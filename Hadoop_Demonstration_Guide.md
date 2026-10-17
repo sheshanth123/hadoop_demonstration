@@ -159,9 +159,10 @@ CORE-SITE.XML_fs.defaultFS=hdfs://namenode
 HDFS-SITE.XML_dfs.namenode.rpc-address=namenode:8020
 HDFS-SITE.XML_dfs.replication=2
 MAPRED-SITE.XML_mapreduce.framework.name=yarn
-MAPRED-SITE.XML_yarn.app.mapreduce.am.env=HADOOP_MAPRED_HOME=$HADOOP_HOME
-MAPRED-SITE.XML_mapreduce.map.env=HADOOP_MAPRED_HOME=$HADOOP_HOME
-MAPRED-SITE.XML_mapreduce.reduce.env=HADOOP_MAPRED_HOME=$HADOOP_HOME
+HADOOP_HOME=/opt/hadoop
+MAPRED-SITE.XML_yarn.app.mapreduce.am.env=HADOOP_MAPRED_HOME=/opt/hadoop
+MAPRED-SITE.XML_mapreduce.map.env=HADOOP_MAPRED_HOME=/opt/hadoop
+MAPRED-SITE.XML_mapreduce.reduce.env=HADOOP_MAPRED_HOME=/opt/hadoop
 YARN-SITE.XML_yarn.resourcemanager.hostname=resourcemanager
 YARN-SITE.XML_yarn.nodemanager.pmem-check-enabled=false
 YARN-SITE.XML_yarn.nodemanager.delete.debug-delay-sec=600
@@ -189,6 +190,7 @@ You do not need to memorise this. The lines worth explaining in class are:
 | `fs.defaultFS=hdfs://namenode` | "When someone says `/data`, they mean HDFS on the machine called `namenode`." |
 | `dfs.replication=2` | Keep **2 copies** of every block by default. The Hadoop default is 3, but 2 is enough to see replication on a small cluster. |
 | `mapreduce.framework.name=yarn` | Run MapReduce jobs on YARN (not locally inside one process). |
+| `HADOOP_HOME` / `HADOOP_MAPRED_HOME=/opt/hadoop` | Points containers to the Hadoop install path (`/opt/hadoop`), ensuring the ApplicationMaster and task runners can locate MapReduce classes. |
 | `yarn.nodemanager.aux-services=mapreduce_shuffle` | Turns on the **shuffle** service, which is how map output travels to reducers. |
 | `pmem-check-enabled` / `vmem-check-enabled = false` | Stops YARN from killing containers for memory-accounting reasons that tend to misfire inside Docker. |
 | `delete.debug-delay-sec=600` | Keeps task logs and files around for 10 minutes after a job, handy for poking around. |
@@ -211,9 +213,11 @@ Only the Python standard library is used, so there is nothing to pip install.
 A fixed random seed means everyone gets the same files (and the same counts).
 """
 import csv
+import os
 import random
 
 random.seed(42)
+os.makedirs("data", exist_ok=True)
 
 # ---------------------------------------------------------------- employees.csv
 DEPARTMENTS = {
@@ -258,7 +262,7 @@ the a of to and in is for with on that by from as at this are be or it""".split(
 # first words get picked far more often -> a nice skewed word-count result
 weights = [1 / (rank + 3) for rank in range(len(WORDS))]
 
-with open("data/sample_text.txt", "w") as f:
+with open("data/sample_text.txt", "w", newline="\n") as f:
     for _ in range(60_000):
         n = random.randint(8, 18)
         f.write(" ".join(random.choices(WORDS, weights=weights, k=n)) + "\n")
@@ -572,6 +576,8 @@ hdfs dfs -cat /user/hadoop/data/employees.csv | head -5
 
 - `-cat` streams the file's contents to the terminal.
 - `| head -5` is a normal Linux pipe: keep only the first 5 lines and stop. This matters, because without it you would print 300,000 lines.
+
+> **Note on pipe closure:** When `head -5` receives its 5 lines and closes the pipe, `cat` may report `cat: Unable to write to output stream.` to stderr. This is standard Unix broken-pipe behavior (`SIGPIPE`) when cutting off a stream early and does not indicate an error.
 
 ```bash
 hdfs dfs -head /user/hadoop/data/employees.csv
@@ -1023,6 +1029,8 @@ Use the failures as teaching moments. Most of them are about timing or memory.
 | `FileAlreadyExistsException` when running a job | Output folder already exists | `hdfs dfs -rm -r <output-folder>` and run again. |
 | Job stuck at `ACCEPTED`, `map 0%` forever | Not enough memory for YARN containers | Give Docker more RAM (6 GB or more), then `docker compose down` and `up` again. |
 | `Container ... is running beyond memory limits` | YARN memory checks | Our `config` already disables these checks. Make sure the lines are present and you restarted the cluster. |
+| `Could not find or load main class ... MRAppMaster` | `HADOOP_MAPRED_HOME` empty or unset in `config` | Ensure `HADOOP_HOME=/opt/hadoop` and `HADOOP_MAPRED_HOME=/opt/hadoop` are explicitly declared in `config`. |
+| `The "HADOOP_HOME" variable is not set` compose warning | `$HADOOP_HOME` referenced without definition in `config` | Set `HADOOP_HOME=/opt/hadoop` and avoid unquoted `$HADOOP_HOME` in `config`. |
 | `hadoop: command not found` | You are in your host shell, not inside the container | Run `docker compose exec namenode bash` first. |
 | `Cannot connect to the Docker daemon` | Docker is not running | Start Docker Desktop or the Docker service. |
 | Browser cannot open `localhost:9870` | Container not up or port not published | `docker compose ps` and check the `ports` mapping. |
